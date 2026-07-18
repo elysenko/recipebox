@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: recipebox
+  namespace: colossus-recipebox
+  labels:
+    app: recipebox
+    managed-by: colossus
+spec:
+  type: ClusterIP
+  selector:
+    app: recipebox
+  ports:
+    - port: 80
+      targetPort: 80
