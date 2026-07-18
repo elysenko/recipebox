@@ -1,0 +1,95 @@
+{
+  "certified": false,
+  "components": {
+    "backend": {
+      "backend_probe_path": "/api/health",
+      "commands": {
+        "test": "python -m pytest -q",
+        "typecheck": "python -m compileall -q app seed.py"
+      },
+      "display_name": "FastAPI (python)",
+      "fingerprint_files": [
+        "requirements.txt",
+        "app/main.py"
+      ],
+      "id": "fastapi",
+      "kind": "backend",
+      "prompt_fragment": "stacks/fastapi-react/backend_agent.md",
+      "root_candidates": [
+        "backend"
+      ],
+      "schema_version": 1
+    },
+    "frontend": {
+      "browser_verify": {
+        "notes": "Pure React SPA: no Angular testability API. Wait = domcontentloaded + fixed settle + optional selector wait; react-router BrowserRouter path-routed (nginx try_files), so route probes must use real paths or in-app nav.",
+        "wait_strategy": "network_settle"
+      },
+      "commands": {
+        "build": "npx vite build",
+        "serve_dev": "npx vite"
+      },
+      "display_name": "React 18 + Vite (SPA)",
+      "fingerprint_files": [
+        "vite.config.ts",
+        "vite.config.js",
+        "vite.config.mjs"
+      ],
+      "fullstack_capable": false,
+      "id": "react-vite",
+      "kind": "frontend",
+      "prompt_fragment": "stacks/react-express/ui_agent.md",
+      "root_candidates": [
+        "web",
+        "frontend",
+        "."
+      ],
+      "schema_version": 1,
+      "test_tuning": {
+        "jest_max_workers": 2
+      }
+    },
+    "orm": {
+      "codegen_before_typecheck": [],
+      "display_name": "SQLAlchemy 2.x (python)",
+      "id": "sqlalchemy",
+      "kind": "orm",
+      "migrate_deploy": "python -m app.init_db",
+      "prompt_fragment": "stacks/fastapi-react/backend_agent.md",
+      "schema_file_candidates": [
+        "app/models.py",
+        "backend/app/models.py"
+      ],
+      "schema_version": 1,
+      "seed_path_candidates": [
+        "seed.py",
+        "backend/seed.py"
+      ]
+    }
+  },
+  "display_name": "React + FastAPI (Vite SPA + FastAPI/SQLAlchemy API)",
+  "docker_targets": [
+    {
+      "context": "backend",
+      "dockerfile": "Dockerfile",
+      "label": "backend"
+    },
+    {
+      "context": "web",
+      "dockerfile": "Dockerfile.frontend",
+      "label": "frontend"
+    }
+  ],
+  "glue": {
+    "api_client": "fetch",
+    "auth_pattern": "jwt_session",
+    "frontend_api_base": "/api"
+  },
+  "known_good_dockerfiles": false,
+  "notes": "SECOND LANGUAGE ECOSYSTEM combo: frontend.react-vite REUSED verbatim from the certified react-express pack; backend is python (FastAPI + SQLAlchemy 2.x, uvicorn on PORT=3000, /api/health, init_db create_all at boot = the migrate-then-start analogue, seed.py prints SEED_CREDS_JSON). No npm in backend/ \u2014 dep-hygiene scans only package.json dirs (web/ only) BY DESIGN; backend resolution is proven by the docker build (language-agnostic gate target). known_good_dockerfiles=false (template ships real-build per-service Dockerfiles). Deep-link routes required; nginx try_files for react-router.",
+  "resolved_schema_version": 1,
+  "schema_version": 1,
+  "serve_topology": "nginx_spa_plus_backend_service",
+  "stack_id": "fastapi-react",
+  "template_dir": "template-fastapi-react"
+}
