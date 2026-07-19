@@ -1,12 +1,51 @@
 # syntax=docker/dockerfile:1
-FROM nginx:1.27-alpine
+# Combined nginx + FastAPI container (supervisord managed) — mandated for full-stack
+# apps: nginx serves the compiled React SPA and proxies /api/ to the local uvicorn.
 
-# Serve a placeholder page — repository contains no application source yet.
-RUN mkdir -p /usr/share/nginx/html && \
-    printf '<!doctype html><html><head><meta charset="utf-8"><title>RecipeBox</title>\n<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:4rem auto;padding:0 1rem;color:#222}h1{margin-bottom:0.25rem}small{color:#666}</style></head>\n<body><h1>RecipeBox</h1><p>The application source has not been added to this repository yet.</p><small>Deployed placeholder — Colossus.</small></body></html>\n' > /usr/share/nginx/html/index.html
+# ── Stage 1: build the React (Vite) frontend ─────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/web
+COPY web/package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund --loglevel=error
+COPY web/ ./
+# BASE_HREF=/ (single-preview: SPA is served at subdomain root)
+RUN npx vite build --base=/
 
-# nginx config: root serves the placeholder; return 200 on /healthz for smoke tests.
-RUN printf 'server {\n  listen 80;\n  root /usr/share/nginx/html;\n  location = /healthz { access_log off; return 200 "ok"; }\n  location / { try_files $uri $uri/ /index.html; }\n}\n' > /etc/nginx/conf.d/default.conf
+# ── Stage 2: install backend Python deps into an isolated venv ───────────────
+FROM python:3.12-slim AS backend-builder
+WORKDIR /app/backend
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY backend/requirements.txt ./
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# ── Stage 3: runtime combining nginx + FastAPI + supervisord ─────────────────
+FROM python:3.12-slim AS runtime
+
+# nginx (SPA server + /api reverse proxy) and supervisor (PID 1 process manager)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx supervisor curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python venv from backend-builder
+COPY --from=backend-builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1
+
+# Backend source
+WORKDIR /app/backend
+COPY backend/ /app/backend/
+
+# Built frontend assets → nginx docroot
+COPY --from=frontend-builder /app/web/dist /usr/share/nginx/html
+
+# nginx site config — replaces default and configures /api + /trpc reverse proxy
+COPY nginx.conf /etc/nginx/sites-available/default
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# supervisord config: runs uvicorn (:3000) + nginx (:80) as foreground children
+COPY supervisord.conf /etc/supervisord.conf
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
