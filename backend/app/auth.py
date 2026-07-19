@@ -48,3 +48,10 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="Unknown user")
     return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Guard for ADMIN-only routes (RolesGuard analogue)."""
+    if user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user

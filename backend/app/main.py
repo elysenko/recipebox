@@ -1,16 +1,28 @@
 """FastAPI app entry. Serve contract: uvicorn on PORT=3000 behind the nginx /api proxy
 (web/nginx.conf strips nothing — all routes here are mounted under /api). Keep
-GET /api/health intact: the platform's backend reachability probe depends on it."""
-from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select
+GET /api/health intact: the platform's backend reachability probe depends on it.
+
+The React SPA is served by its own nginx service (serve_topology =
+nginx_spa_plus_backend_service); this process is API-only."""
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .auth import get_current_user, sign_token, verify_password
 from .database import get_db
-from .models import User
+from .routers import auth, plan, recipes, settings, shopping, users
 
 app = FastAPI(title="app-backend", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+# SPA and API share an origin in production (nginx proxies /api). CORS stays open
+# so the vite dev-server and any preview host can reach the API directly.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/health")
@@ -18,19 +30,19 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-class LoginBody(BaseModel):
-    email: str
-    password: str
+@app.get("/api/health/deep")
+def health_deep(db: Session = Depends(get_db)) -> dict:
+    """Deep probe: confirm the database is reachable."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "db": "ok"}
+    except Exception as exc:  # noqa: BLE001 — surface the DB failure to the probe
+        return {"status": "error", "db": "error", "detail": str(exc)}
 
 
-@app.post("/api/auth/login")
-def login(body: LoginBody, db: Session = Depends(get_db)) -> dict:
-    user = db.execute(select(User).where(User.email == body.email)).scalar_one_or_none()
-    if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return {"token": sign_token(user), "user": {"id": user.id, "email": user.email, "role": user.role, "name": user.name}}
-
-
-@app.get("/api/auth/me")
-def me(user: User = Depends(get_current_user)) -> dict:
-    return {"id": user.id, "email": user.email, "role": user.role, "name": user.name}
+app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(recipes.router)
+app.include_router(plan.router)
+app.include_router(shopping.router)
+app.include_router(settings.router)
