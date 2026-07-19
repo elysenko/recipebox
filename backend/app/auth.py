@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import User
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is required and was not set; "
+        "refusing to start with an insecure default."
+    )
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _bearer = HTTPBearer(auto_error=False)
 
